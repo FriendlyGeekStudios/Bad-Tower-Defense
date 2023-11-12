@@ -4,6 +4,10 @@
 #include "RandomWalkLibrary.h"
 #include "MapUtilitiesLibrary.h"
 
+// We want to make this high, but not so high that our absolute limit becomes a viable path
+constexpr int32 BORDER_INFINITY = TNumericLimits<int32>::Max() / 2;
+constexpr int32 MAX_WEIGHT = BORDER_INFINITY / 10;
+
 struct GraphNode {
 	int32 weight = TNumericLimits<int32>::Max();
 	int32 distance = TNumericLimits<int32>::Max();
@@ -73,6 +77,109 @@ TArray<FCoordinate2D> URandomWalkLibrary::DimerizationWalk(int32 mapSize, const 
 	return result;
 }
 
+struct HexGrid {
+	static TArray<FCoordinate2D> DIRECTIONS; // will have 6.. used to obtain neighbors...
+
+	int32 dimensions;
+	TSet<FCoordinate2D> walls; // If we want impassable objects
+
+	HexGrid(int32 dimensions) : dimensions(dimensions), walls() {}
+
+	bool InBounds(const FCoordinate2D& location) const {
+		return location.X >= 0 && location.X < dimensions && location.Y >= 0 && location.Y < dimensions;
+
+	}
+
+	bool IsPassable(const FCoordinate2D& location) const {
+		return !walls.Contains(location);
+	}
+
+	TArray<FCoordinate2D> GetNeighbors(const FCoordinate2D& location) const {
+		TArray<FCoordinate2D> results;
+
+		for (auto const& direction : DIRECTIONS) {
+			auto next = FCoordinate2D(location.X + direction.X, location.Y + location.Y);
+			if (InBounds(next) && IsPassable(next)) {
+				results.Add(next);
+			}
+		}
+
+		return results;
+	}
+};
+
+struct GridWithWeights : HexGrid {
+	TSet<FCoordinate2D> forests;
+	GridWithWeights(int32 dimensions = 8) : HexGrid(dimensions) {}
+
+	int32 Cost(const FCoordinate2D& location, const FRandomStream& stream) {
+		if (location.X == 0 || location.X == dimensions - 1 || location.Y == 0 || location.Y == dimensions - 1) {
+			return TNumericLimits<int32>::Max();
+		}
+
+		return stream.RandRange(0, MAX_WEIGHT);
+	}
+
+};
+
+TArray<FCoordinate2D> HexGrid::DIRECTIONS = TArray<FCoordinate2D>({ {-1, 0}, {-1, -1}, {0, -1}, {1, 0}, {1, 1}, {0, 1} });
+
+template<typename T>
+struct TPriorityQueueNode {
+	T element{};
+	float priority = 0.0;
+
+	TPriorityQueueNode() {}
+
+	TPriorityQueueNode(T element, float priority) : element(element), priority(priority) {
+
+	}
+
+	bool operator<(const TPriorityQueueNode<T>& other) const {
+		return priority < other.priority;
+	}
+};
+
+template<typename T>
+class TPriorityQueue {
+	TArray<TPriorityQueueNode<T>> array_;
+public:
+	TPriorityQueue() {
+		array_.Heapify();
+	}
+
+	T Pop() {
+		if (array_.IsEmpty()) {
+			return T(); // error...
+		}
+		TPriorityQueueNode<T> node;
+
+		array_.HeapPop(node);
+
+		return node.element;
+	}
+
+	TPriorityQueueNode<T> PopNode() {
+		if (array_.IsEmpty()) {
+			return {}; // error...
+		}
+
+		TPriorityQueueNode<T> node;
+
+		array_.HeapPop(node);
+
+		return node;
+	}
+
+	void Push(T element, float priority) {
+		array_.HeapPush({ element, priority });
+	}
+
+	bool IsEmpty() const {
+		return array_.IsEmpty();
+	}
+};
+
 /// <summary>
 /// Find a random path through a Hex-based grid using Dijkstra's Pathfinding Algorithm. This is achieved by assigning random weights to all navigable paths and aiming for a minimal length path
 /// </summary>
@@ -81,84 +188,52 @@ TArray<FCoordinate2D> URandomWalkLibrary::DimerizationWalk(int32 mapSize, const 
 /// <param name="stream"></param>
 /// <param name="dimensions"></param>
 /// <returns></returns>
-TArray<FCoordinate2D> URandomWalkLibrary::DijkstraRandomPath(FCoordinate2D start, FCoordinate2D end, const FRandomStream& stream, int32 dimensions) {
-	int32 mapSize = dimensions * dimensions;
-	TArray<GraphNode> weightMap;
-	// Using a 1D array for performance and simplicity...
-	weightMap.Init(GraphNode(), mapSize);
+TArray<FCoordinate2D> URandomWalkLibrary::DijkstraRandomPath(const FCoordinate2D& start, const FCoordinate2D& end, const FRandomStream& stream, int32 dimensions) {
+	auto graph = GridWithWeights();
 
-	TArray<bool> visited;
-	visited.Init(false, mapSize);
+	TPriorityQueue<FCoordinate2D> frontier;
+	frontier.Push(start, 0);
 
-	auto startIndex = UMapUtilitiesLibrary::ConvertCoordinatesToIndex(start.X, start.Y);
-	auto endIndex = UMapUtilitiesLibrary::ConvertCoordinatesToIndex(end.X, end.Y);
+	TMap<FCoordinate2D, FCoordinate2D> cameFrom{};
+	TMap<FCoordinate2D, int32> costSoFar{};
 
-	weightMap[startIndex] = GraphNode(0, 0);
-	weightMap[endIndex] = GraphNode(0, 0);
+	cameFrom.Add(start, start);
+	costSoFar.Add(start, 0);
 
-	// We want to make this high, but not so high that our absolute limit becomes a viable path
-	constexpr int32 MAX_WEIGHT = TNumericLimits<int32>::Max() / 2;
+	FCoordinate2D current;
 
-	// Apply random weights...
-	// TODO: We may want this randomness to be based on some kind of heat map determined by the direction that we are travelling
-	for (int i = 1; i < dimensions - 1; i++) {
-		for (int j = 1; j < dimensions - 1; j++) {
-			auto index = UMapUtilitiesLibrary::ConvertCoordinatesToIndex(i, j);
-			weightMap[index].weight = stream.RandRange(1, MAX_WEIGHT);
+	while (!frontier.IsEmpty()) {
+		current = frontier.Pop();
+		if (current == end) {
+			break;
+		}
+
+		for (auto& next : graph.GetNeighbors(current)) {
+			// Can we guarantee that costSoFar will have current??
+			auto newCost = costSoFar[current] + graph.Cost(next, stream);
+			if (!costSoFar.Contains(next) || newCost < costSoFar[next]) {
+				costSoFar.FindOrAdd(next, newCost); // [next] = newCost;
+				cameFrom.FindOrAdd(next, current); //cameFrom[next] = current;
+				frontier.Push(next, newCost);
+			}
 		}
 	}
+
+	// we made it to the end or we have completed and entire search
 
 	TArray<FCoordinate2D> path;
-
-	// When we select neighbors, we have to calculate 6 positions (yay hexes....) include (-1, 1) and (1,-1) in terms of relative coordinates
-
-	TQueue<FCoordinate2D> unvisitedNodes;
-	unvisitedNodes.Enqueue(start);
-	int neighborIndex = 0;
-
-	auto currentPosition = start;
-	while (!unvisitedNodes.IsEmpty()) {
-		unvisitedNodes.Peek(currentPosition);
-		auto currentIndex = UMapUtilitiesLibrary::ConvertCoordinatesToIndex(currentPosition.X, currentPosition.Y);
-		visited[currentIndex] = true;
-
-		auto neighbors = GetHexNeighbors(currentPosition, dimensions);
-
-		for (auto& neighbor : neighbors) {
-			neighborIndex = UMapUtilitiesLibrary::ConvertCoordinatesToIndex(neighbor.X, neighbor.Y);
-			if (!visited[neighborIndex]) {
-				if (weightMap[currentIndex].distance + weightMap[neighborIndex].weight < weightMap[neighborIndex].distance) {
-					weightMap[neighborIndex].distance = weightMap[currentIndex].distance + weightMap[neighborIndex].weight;
-				}
-				unvisitedNodes.Enqueue(neighbor);
-			}
-		}
-
-		unvisitedNodes.Pop();
+	if (!cameFrom.Contains(end)) {
+		return path;
 	}
 
-	// The weight to distance ratio is now completely calculated
-	// We just have to backtrack until we are back at our destination
-	currentPosition = end;
-	while (currentPosition != start) {
-		// get the neighbors
-		auto neighbors = GetHexNeighbors(currentPosition, dimensions);
+	current = end;
 
-		auto nearestNeighbor = neighbors[0];
-		for (auto& neighbor : neighbors) {
-			neighborIndex = UMapUtilitiesLibrary::ConvertCoordinatesToIndex(neighbor.X, neighbor.Y);
-			auto nearestIndex = UMapUtilitiesLibrary::ConvertCoordinatesToIndex(nearestNeighbor.X, nearestNeighbor.Y);
-			// Need currentNearestNeighbors distance and current neighbors nearest distance
-			if (weightMap[neighborIndex].distance < weightMap[nearestIndex].distance) {
-				nearestNeighbor = neighbor;
-			}
-		}
-
-		currentPosition = nearestNeighbor;
-		path.Add(currentPosition);
+	while (current != start) {
+		path.Add(current);
+		current = cameFrom[current];
 	}
 
-
+	// May need to reverse it ... ??
 	return path;
 }
 
@@ -187,6 +262,18 @@ TArray<FCoordinate2D> URandomWalkLibrary::GetOutOfBoundsNeighbors(FCoordinate2D 
 	}
 
 	return neighbors;
+}
+
+TArray<FCoordinate2D> URandomWalkLibrary::GetAllNeighbors(const FCoordinate2D& tile, int32 dimensions)
+{
+	return TArray<FCoordinate2D>({
+		{tile.X - 1, tile.Y -1},
+		{tile.X, tile.Y - 1},
+		{tile.X - 1, tile.Y},
+		{tile.X + 1, tile.Y},
+		{tile.X, tile.Y + 1},
+		{tile.X - 1, tile.Y + 1}
+		});
 }
 
 TArray<FCoordinate2D> URandomWalkLibrary::GetHexNeighbors(FCoordinate2D start, int32 dimensions)

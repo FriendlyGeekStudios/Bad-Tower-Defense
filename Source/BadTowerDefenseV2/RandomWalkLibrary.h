@@ -28,10 +28,13 @@ class BADTOWERDEFENSEV2_API URandomWalkLibrary : public UBlueprintFunctionLibrar
 	static TArray<FCoordinate2D> DimerizationWalk(int32 mapSize, const FRandomStream& stream);
 
 	UFUNCTION(BlueprintCallable)
-	static TArray<FCoordinate2D> DijkstraRandomPath(FCoordinate2D start, FCoordinate2D end, const FRandomStream& stream, int32 dimensions = 8);
+	static TArray<FCoordinate2D> DijkstraRandomPath(const FCoordinate2D& start, const FCoordinate2D& end, const FRandomStream& stream, int32 dimensions = 8);
 
 	UFUNCTION(BlueprintCallable, BlueprintPure)
 	static TArray<FCoordinate2D> GetOutOfBoundsNeighbors(FCoordinate2D tile, int32 dimensions = 8);
+
+	UFUNCTION(BlueprintCallable, BlueprintPure)
+	static TArray<FCoordinate2D> GetAllNeighbors(const  FCoordinate2D& tile, int32 dimensions = 8);
 
 private:
 	UFUNCTION()

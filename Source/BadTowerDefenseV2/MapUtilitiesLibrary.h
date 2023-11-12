@@ -25,4 +25,10 @@ public:
 
 	UFUNCTION(BlueprintCallable)
 	static FCoordinate2D ConvertIndexToCoordinates(int32 index, int32 dimensions = 8);
+
+	UFUNCTION(BlueprintCallable, BlueprintPure)
+	static FCoordinate2D ConvertGlobalCoordinateToChunkCoordinate(const FCoordinate2D& location, int32 dimensions = 8);
+
+	UFUNCTION(BlueprintCallable, BlueprintPure)
+	static FCoordinate2D ConvertGlobalCoordinateToChunkLocalCoordinate(const FCoordinate2D& location, int32 dimensions = 8);
 };

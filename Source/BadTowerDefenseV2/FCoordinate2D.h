@@ -31,6 +31,10 @@ struct FCoordinate2D {
 		return !(lhs == rhs);
 	}
 
+	friend bool operator<(const FCoordinate2D& lhs, const FCoordinate2D& rhs) {
+		return Tie(lhs.X, lhs.Y) < Tie(rhs.X, rhs.Y);
+	}
+
 	friend uint32 GetTypeHash(const FCoordinate2D& obj) {
 		return obj.X * 402653189 ^ obj.Y * 805306457;
 	}
