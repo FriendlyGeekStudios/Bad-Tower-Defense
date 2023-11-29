@@ -8,12 +8,6 @@
 constexpr int32 BORDER_INFINITY = TNumericLimits<int32>::Max() / 2;
 constexpr int32 MAX_WEIGHT = BORDER_INFINITY / 10;
 
-struct GraphNode {
-	int32 weight = TNumericLimits<int32>::Max();
-	int32 distance = TNumericLimits<int32>::Max();
-};
-
-
 bool URandomWalkLibrary::IsSelfAvoiding(TArray<FCoordinate2D> walk, int32 mapSize)
 {
 	auto data = TSet<FCoordinate2D>(walk);
@@ -77,109 +71,6 @@ TArray<FCoordinate2D> URandomWalkLibrary::DimerizationWalk(int32 mapSize, const 
 	return result;
 }
 
-struct HexGrid {
-	static TArray<FCoordinate2D> DIRECTIONS; // will have 6.. used to obtain neighbors...
-
-	int32 dimensions;
-	TSet<FCoordinate2D> walls; // If we want impassable objects
-
-	HexGrid(int32 dimensions) : dimensions(dimensions), walls() {}
-
-	bool InBounds(const FCoordinate2D& location) const {
-		return location.X >= 0 && location.X < dimensions && location.Y >= 0 && location.Y < dimensions;
-
-	}
-
-	bool IsPassable(const FCoordinate2D& location) const {
-		return !walls.Contains(location);
-	}
-
-	TArray<FCoordinate2D> GetNeighbors(const FCoordinate2D& location) const {
-		TArray<FCoordinate2D> results;
-
-		for (auto const& direction : DIRECTIONS) {
-			auto next = FCoordinate2D(location.X + direction.X, location.Y + location.Y);
-			if (InBounds(next) && IsPassable(next)) {
-				results.Add(next);
-			}
-		}
-
-		return results;
-	}
-};
-
-struct GridWithWeights : HexGrid {
-	TSet<FCoordinate2D> forests;
-	GridWithWeights(int32 dimensions = 8) : HexGrid(dimensions) {}
-
-	int32 Cost(const FCoordinate2D& location, const FRandomStream& stream) {
-		if (location.X == 0 || location.X == dimensions - 1 || location.Y == 0 || location.Y == dimensions - 1) {
-			return TNumericLimits<int32>::Max();
-		}
-
-		return stream.RandRange(0, MAX_WEIGHT);
-	}
-
-};
-
-TArray<FCoordinate2D> HexGrid::DIRECTIONS = TArray<FCoordinate2D>({ {-1, 0}, {-1, -1}, {0, -1}, {1, 0}, {1, 1}, {0, 1} });
-
-template<typename T>
-struct TPriorityQueueNode {
-	T element{};
-	float priority = 0.0;
-
-	TPriorityQueueNode() {}
-
-	TPriorityQueueNode(T element, float priority) : element(element), priority(priority) {
-
-	}
-
-	bool operator<(const TPriorityQueueNode<T>& other) const {
-		return priority < other.priority;
-	}
-};
-
-template<typename T>
-class TPriorityQueue {
-	TArray<TPriorityQueueNode<T>> array_;
-public:
-	TPriorityQueue() {
-		array_.Heapify();
-	}
-
-	T Pop() {
-		if (array_.IsEmpty()) {
-			return T(); // error...
-		}
-		TPriorityQueueNode<T> node;
-
-		array_.HeapPop(node);
-
-		return node.element;
-	}
-
-	TPriorityQueueNode<T> PopNode() {
-		if (array_.IsEmpty()) {
-			return {}; // error...
-		}
-
-		TPriorityQueueNode<T> node;
-
-		array_.HeapPop(node);
-
-		return node;
-	}
-
-	void Push(T element, float priority) {
-		array_.HeapPush({ element, priority });
-	}
-
-	bool IsEmpty() const {
-		return array_.IsEmpty();
-	}
-};
-
 /// <summary>
 /// Find a random path through a Hex-based grid using Dijkstra's Pathfinding Algorithm. This is achieved by assigning random weights to all navigable paths and aiming for a minimal length path
 /// </summary>
@@ -220,9 +111,9 @@ TArray<FCoordinate2D> URandomWalkLibrary::DijkstraRandomPath(const FCoordinate2D
 				continue;
 			}
 
-			auto newCost = costSoFar[current] + stream.RandRange(0, 10000);
+			auto newCost = costSoFar[current] + stream.RandRange(0, MAX_WEIGHT);
 			if (neighbor.X == 0 || neighbor.X == dimensions - 1 || neighbor.Y == 0 || neighbor.Y == dimensions - 1) {
-				newCost = 1000000;
+				newCost = BORDER_INFINITY;
 			}
 
 			if (neighbor == end) {
@@ -243,6 +134,10 @@ TArray<FCoordinate2D> URandomWalkLibrary::DijkstraRandomPath(const FCoordinate2D
 	TArray<FCoordinate2D> results;
 	current = end;
 	while (current != start) {
+		if (results.Num() > 64) {
+			UE_LOG(LogTemp, Log, TEXT("Failed to find a path for some reason. Would enchroach infinity"));
+			break;
+		}
 		results.Add(current);
 		current = cameFrom[current];
 	}
@@ -284,18 +179,130 @@ TArray<FCoordinate2D> URandomWalkLibrary::GetOutOfBoundsNeighbors(FCoordinate2D 
 	return neighbors;
 }
 
-TArray<FCoordinate2D> URandomWalkLibrary::GetAllNeighbors(const FCoordinate2D& tile, int32 dimensions)
-{
+TArray<FCoordinate2D> GetOddRNeighbors(const FCoordinate2D& tile) {
+	auto isEven = tile.X % 2 == 0;
+
+	if (isEven) { // even rows...
+		return TArray<FCoordinate2D>({
+			{tile.X + 1, tile.Y},
+			{tile.X, tile.Y - 1},
+			{tile.X - 1, tile.Y - 1},
+			{tile.X - 1, tile.Y},
+			{tile.X - 1, tile.Y + 1},
+			{tile.X, tile.Y + 1},
+			});
+
+	}
+
 	return TArray<FCoordinate2D>({
-		{tile.X - 1, tile.Y - 1},
-		{tile.X, tile.Y - 1},
-		{tile.X - 1, tile.Y},
-		{tile.X + 1, tile.Y},
-		{tile.X, tile.Y + 1},
-		{tile.X - 1, tile.Y + 1}
+			{tile.X + 1, tile.Y},
+			{tile.X + 1, tile.Y - 1},
+			{tile.X, tile.Y - 1 },
+			{tile.X - 1, tile.Y},
+			{tile.X, tile.Y + 1},
+			{tile.X + 1, tile.Y + 1}
 		});
 }
- 
+TArray<FCoordinate2D> GetEvenRNeighbors(const FCoordinate2D& tile) {
+	auto isEven = tile.X % 2 == 0;
+
+	if (!isEven) {
+		return TArray<FCoordinate2D>({
+			{tile.X + 1, tile.Y},
+			{tile.X + 1, tile.Y - 1},
+			{tile.X, tile.Y - 1},
+			{tile.X - 1, tile.Y},
+			{tile.X, tile.Y + 1},
+			{tile.X + 1, tile.Y + 1},
+			});
+
+	}
+
+	return TArray<FCoordinate2D>({
+			{tile.X + 1, tile.Y},
+			{tile.X, tile.Y - 1},
+			{tile.X - 1, tile.Y - 1 },
+			{tile.X - 1, tile.Y},
+			{tile.X - 1, tile.Y + 1},
+			{tile.X, tile.Y + 1}
+		});
+}
+TArray<FCoordinate2D> GetOddQNeighbors(const FCoordinate2D& tile) {
+	auto isEven = tile.X % 2 == 0;
+
+	if (!isEven) {
+		return TArray<FCoordinate2D>({
+			{tile.X + 1, tile.Y},
+			{tile.X + 1, tile.Y - 1},
+			{tile.X, tile.Y - 1},
+			{tile.X - 1, tile.Y - 1},
+			{tile.X - 1, tile.Y},
+			{tile.X, tile.Y + 1},
+			});
+
+	}
+
+	return TArray<FCoordinate2D>({
+			{tile.X + 1, tile.Y + 1},
+			{tile.X + 1, tile.Y},
+			{tile.X, tile.Y - 1 },
+			{tile.X - 1, tile.Y},
+			{tile.X - 1, tile.Y + 1},
+			{tile.X, tile.Y + 1}
+		});
+}
+TArray<FCoordinate2D> GetEvenQNeighbors(const FCoordinate2D& tile) {
+	auto isEven = tile.X % 2 == 0;
+
+	if (!isEven) {
+		return TArray<FCoordinate2D>({
+			{tile.X + 1, tile.Y + 1},
+			{tile.X + 1, tile.Y},
+			{tile.X, tile.Y - 1},
+			{tile.X - 1, tile.Y},
+			{tile.X - 1, tile.Y + 1},
+			{tile.X, tile.Y + 1},
+			});
+
+	}
+
+	return TArray<FCoordinate2D>({
+			{tile.X + 1, tile.Y},
+			{tile.X + 1, tile.Y - 1},
+			{tile.X, tile.Y - 1 },
+			{tile.X - 1, tile.Y - 1},
+			{tile.X - 1, tile.Y},
+			{tile.X, tile.Y + 1}
+		});
+}
+
+
+TArray<FCoordinate2D> URandomWalkLibrary::GetAllNeighbors(const FCoordinate2D& tile, int32 dimensions)
+{
+	auto parity = tile.Y % 2 == 0; // if even, this will be 0
+
+	if (parity) {
+		return TArray<FCoordinate2D>({
+			{tile.X - 1, tile.Y},
+			{tile.X - 1, tile.Y - 1},
+			{tile.X, tile.Y - 1},
+			{tile.X + 1, tile.Y},
+			{tile.X, tile.Y + 1},
+			{tile.X - 1, tile.Y + 1},
+			});
+
+	}
+
+	return TArray<FCoordinate2D>({
+			{tile.X - 1, tile.Y},
+			{tile.X, tile.Y - 1},
+			{tile.X + 1, tile.Y - 1 },
+			{tile.X + 1, tile.Y},
+			{tile.X + 1, tile.Y + 1},
+			{tile.X, tile.Y + 1}
+		});
+}
+
 /// <summary>
 /// Finds a neighboring tile that is in another chunk
 /// </summary>

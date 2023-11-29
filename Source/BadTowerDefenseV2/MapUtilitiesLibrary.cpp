@@ -1,5 +1,6 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
+/// EVAN, YOU ARE USING EVEN-R HEXAGON LABELING WITH EVEN ROWS ALL COLS!!!!
 
 #include "MapUtilitiesLibrary.h"
 
@@ -45,7 +46,17 @@ FCoordinate2D UMapUtilitiesLibrary::ConvertGlobalCoordinateToChunkCoordinate(con
 
 FCoordinate2D UMapUtilitiesLibrary::ConvertGlobalCoordinateToChunkLocalCoordinate(const FCoordinate2D& location, int32 dimensions)
 {
-	auto result = FCoordinate2D(FMath::Abs(location.X) % dimensions, FMath::Abs(location.Y) % dimensions);
+	// Using this chunkCoordinate, I need to add special handling IF the coordinates are negative...
+	// Need special handling because negatives are stupid!
+	auto result = FCoordinate2D(location.X % dimensions, location.Y % dimensions);
+
+	if (result.X < 0) {
+		result.X += dimensions;
+	}
+
+	if (result.Y < 0) {
+		result.Y += dimensions;
+	}
 	UE_LOG(LogTemp, Display, TEXT("Convert Global Coordinate (%d, %d) to Chunk Local Coordinate (%d, %d)"), location.X, location.Y, result.X, result.Y);
 
 	return result;
