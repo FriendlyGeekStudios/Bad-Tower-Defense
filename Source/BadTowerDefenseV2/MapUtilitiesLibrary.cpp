@@ -13,7 +13,9 @@ bool UMapUtilitiesLibrary::IsNonCornerEdgeTile(int32 X, int32 Y, int32 dimension
 
 int32 UMapUtilitiesLibrary::ConvertCoordinatesToIndex(int32 X, int32 Y, int32 dimensions)
 {
-	return dimensions * X + Y;
+	auto index = dimensions * X + Y;
+	UE_LOG(LogTemp, Log, TEXT("Converted Coordinate (%d, %d) to index %d"), X, Y, index);
+	return index;
 }
 
 FCoordinate2D UMapUtilitiesLibrary::ConvertIndexToCoordinates(int32 index, int32 dimensions)
@@ -24,8 +26,17 @@ FCoordinate2D UMapUtilitiesLibrary::ConvertIndexToCoordinates(int32 index, int32
 
 FCoordinate2D UMapUtilitiesLibrary::ConvertGlobalCoordinateToChunkCoordinate(const FCoordinate2D& location, int32 dimensions)
 {
-	auto x = (location.X / dimensions) + (location.X < 0 ? -1 : 0);
-	auto y = (location.Y / dimensions) + (location.Y < 0 ? -1 : 0);
+	
+	auto x = (location.X / dimensions);
+	auto y = (location.Y / dimensions);
+
+	if (location.X < 0 && location.X % dimensions) {
+		x -= 1;
+	}
+
+	if (location.Y < 0 && location.Y % dimensions) {
+		y -= 1;
+	}
 
 	auto result = FCoordinate2D(x, y);
 	UE_LOG(LogTemp, Display, TEXT("Converting Global Coordinate (%d, %d) to Chunk Coordinate: (%d, %d)"), location.X, location.Y, result.X, result.Y);
@@ -34,7 +45,7 @@ FCoordinate2D UMapUtilitiesLibrary::ConvertGlobalCoordinateToChunkCoordinate(con
 
 FCoordinate2D UMapUtilitiesLibrary::ConvertGlobalCoordinateToChunkLocalCoordinate(const FCoordinate2D& location, int32 dimensions)
 {
-	auto result = FCoordinate2D(location.X % dimensions, location.Y % dimensions);
+	auto result = FCoordinate2D(FMath::Abs(location.X) % dimensions, FMath::Abs(location.Y) % dimensions);
 	UE_LOG(LogTemp, Display, TEXT("Convert Global Coordinate (%d, %d) to Chunk Local Coordinate (%d, %d)"), location.X, location.Y, result.X, result.Y);
 
 	return result;

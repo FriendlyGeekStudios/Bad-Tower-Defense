@@ -189,52 +189,72 @@ public:
 /// <param name="dimensions"></param>
 /// <returns></returns>
 TArray<FCoordinate2D> URandomWalkLibrary::DijkstraRandomPath(const FCoordinate2D& start, const FCoordinate2D& end, const FRandomStream& stream, int32 dimensions) {
-	auto graph = GridWithWeights();
+	/*TArray<FCoordinate2D> temp;
+	temp.Add(start);
+	temp.Add(end);
+	return temp;*/
 
-	TPriorityQueue<FCoordinate2D> frontier;
-	frontier.Push(start, 0);
+	UE_LOG(LogTemp, Log, TEXT("Finding Path from (%d, %d) to (%d, %d)"), start.X, start.Y, end.X, end.Y);
 
-	TMap<FCoordinate2D, FCoordinate2D> cameFrom{};
-	TMap<FCoordinate2D, int32> costSoFar{};
-
+	TArray<FCoordinate2D> frontier;
+	frontier.Add(start);
+	TMap<FCoordinate2D, FCoordinate2D> cameFrom;
 	cameFrom.Add(start, start);
+	TMap<FCoordinate2D, int32> costSoFar;
 	costSoFar.Add(start, 0);
 
+	if (frontier.IsEmpty()) {
+		UE_LOG(LogTemp, Warning, TEXT("Frontier is Empty for some reason!"));
+		return {};
+	}
+
 	FCoordinate2D current;
+	while (!frontier.IsEmpty() && frontier[0] != end) {
+		current = frontier[0];
+		frontier.RemoveAt(0);
+		auto neighbors = GetAllNeighbors(current);
+		for (auto& neighbor : neighbors) {
+			// check that neighbor is valid...
+			if (neighbor.X < 0 || neighbor.Y < 0 || neighbor.X >= dimensions || neighbor.Y >= dimensions) {
+				// UE_LOG(LogTemp, Log, TEXT("Invalid Neighbor Checked ({%d},{%d})..."), neighbor.X, neighbor.Y); // Should only really encounter this a few times per chunk
+				continue;
+			}
 
-	while (!frontier.IsEmpty()) {
-		current = frontier.Pop();
-		if (current == end) {
-			break;
-		}
+			auto newCost = costSoFar[current] + stream.RandRange(0, 10000);
+			if (neighbor.X == 0 || neighbor.X == dimensions - 1 || neighbor.Y == 0 || neighbor.Y == dimensions - 1) {
+				newCost = 1000000;
+			}
 
-		for (auto& next : graph.GetNeighbors(current)) {
-			// Can we guarantee that costSoFar will have current??
-			auto newCost = costSoFar[current] + graph.Cost(next, stream);
-			if (!costSoFar.Contains(next) || newCost < costSoFar[next]) {
-				costSoFar.FindOrAdd(next, newCost); // [next] = newCost;
-				cameFrom.FindOrAdd(next, current); //cameFrom[next] = current;
-				frontier.Push(next, newCost);
+			if (neighbor == end) {
+				newCost = 0;
+			}
+
+			if (!costSoFar.Contains(neighbor) || newCost < costSoFar[neighbor]) {
+				costSoFar.FindOrAdd(neighbor);
+				costSoFar[neighbor] = newCost;
+				cameFrom.FindOrAdd(neighbor);
+				cameFrom[neighbor] = current;
+				frontier.Add(neighbor);
 			}
 		}
 	}
 
-	// we made it to the end or we have completed and entire search
-
-	TArray<FCoordinate2D> path;
-	if (!cameFrom.Contains(end)) {
-		return path;
-	}
-
+	// Algorithm is complete... lets backtrack...
+	TArray<FCoordinate2D> results;
 	current = end;
-
 	while (current != start) {
-		path.Add(current);
+		results.Add(current);
 		current = cameFrom[current];
 	}
 
-	// May need to reverse it ... ??
-	return path;
+	results.Add(current);
+
+	UE_LOG(LogTemp, Log, TEXT("Path for Chunk"));
+	for (auto& tile : results) {
+		UE_LOG(LogTemp, Log, TEXT("\t(%d, %d)"), tile.X, tile.Y);
+	}
+
+	return results;
 }
 
 TArray<FCoordinate2D> URandomWalkLibrary::GetOutOfBoundsNeighbors(FCoordinate2D tile, int32 dimensions)
@@ -267,13 +287,51 @@ TArray<FCoordinate2D> URandomWalkLibrary::GetOutOfBoundsNeighbors(FCoordinate2D 
 TArray<FCoordinate2D> URandomWalkLibrary::GetAllNeighbors(const FCoordinate2D& tile, int32 dimensions)
 {
 	return TArray<FCoordinate2D>({
-		{tile.X - 1, tile.Y -1},
+		{tile.X - 1, tile.Y - 1},
 		{tile.X, tile.Y - 1},
 		{tile.X - 1, tile.Y},
 		{tile.X + 1, tile.Y},
 		{tile.X, tile.Y + 1},
 		{tile.X - 1, tile.Y + 1}
 		});
+}
+ 
+/// <summary>
+/// Finds a neighboring tile that is in another chunk
+/// </summary>
+/// <param name="node">Global position of the tile we're currently analyzing</param>
+/// <param name="nextChunkCoordinate"></param>
+/// <param name="stream"></param>
+/// <param name="dimensions"></param>
+/// <returns></returns>
+FCoordinate2D URandomWalkLibrary::FindNeighborInNextChunk(const FCoordinate2D& node, const FCoordinate2D& nextChunkCoordinate, const FRandomStream& stream, int32 dimensions)
+{
+	UE_LOG(LogTemp, Log, TEXT("Looking for Neighbors for node (%d, %d) in Chunk (%d, %d)"), node.X, node.Y, nextChunkCoordinate.X, nextChunkCoordinate.Y);
+
+	auto neighbors = GetAllNeighbors(node).FilterByPredicate([&](const FCoordinate2D& coord) {
+		// Need to make sure we aren't going to grab a tile corner.
+		// Honestly. corners are unlikely to be an issue any more with the self-avoiding walk...
+
+		return nextChunkCoordinate == UMapUtilitiesLibrary::ConvertGlobalCoordinateToChunkCoordinate(coord);
+		});
+
+	for (auto& neighbor : neighbors) {
+		UE_LOG(LogTemp, Log, TEXT("\tPotential Neighbor (%d, %d)"), neighbor.X, neighbor.Y);
+	}
+
+	// get random neighbor..
+	UE_LOG(LogTemp, Log, TEXT("Found %d potential neighbors"), neighbors.Num());
+
+	if (neighbors.IsEmpty()) {
+		return {};
+	}
+
+	auto result = neighbors[stream.RandRange(0, neighbors.Num() - 1)];
+
+	UE_LOG(LogTemp, Log, TEXT("\t SELECTED (%d, %d)"), result.X, result.Y);
+
+	return result;
+
 }
 
 TArray<FCoordinate2D> URandomWalkLibrary::GetHexNeighbors(FCoordinate2D start, int32 dimensions)

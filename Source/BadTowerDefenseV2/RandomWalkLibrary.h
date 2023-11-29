@@ -36,6 +36,10 @@ class BADTOWERDEFENSEV2_API URandomWalkLibrary : public UBlueprintFunctionLibrar
 	UFUNCTION(BlueprintCallable, BlueprintPure)
 	static TArray<FCoordinate2D> GetAllNeighbors(const  FCoordinate2D& tile, int32 dimensions = 8);
 
+	UFUNCTION(BlueprintCallable, BlueprintPure)
+	static FCoordinate2D FindNeighborInNextChunk(const FCoordinate2D& node, const FCoordinate2D& nextChunkCoordinate, const FRandomStream& stream, int32 dimensions = 8);
+
+
 private:
 	UFUNCTION()
 	static TArray<FCoordinate2D> GetHexNeighbors(FCoordinate2D start, int32 dimensions = 8);

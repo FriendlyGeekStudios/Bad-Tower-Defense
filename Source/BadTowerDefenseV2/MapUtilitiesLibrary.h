@@ -31,4 +31,5 @@ public:
 
 	UFUNCTION(BlueprintCallable, BlueprintPure)
 	static FCoordinate2D ConvertGlobalCoordinateToChunkLocalCoordinate(const FCoordinate2D& location, int32 dimensions = 8);
+
 };
